@@ -1,0 +1,779 @@
+---
+title: "Introduction to \\'R\\'"
+author: "Mail: robert.krautz@bio.ku.dk, Twitter: @_rob_kr_"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+***
+
+# [1.] <b>"R is not Excel"</b> - an example
+
+## [1.0.] Load necessary packages
+#### Step 1: Build your environment.
+```{r message=FALSE}
+library(tidyverse)
+library(biomaRt)
+```
+
+## [1.1.] Establish connection with Ensembl database
+#### 'Marts' are BioMart databases hosted on the Ensembl server.
+#### 'useMart' & 'useDataset' establish a specific connection to the Spombe Ensembl database.
+```{r warning=FALSE}
+ensembl <- useMart(
+    biomart = "fungi_mart",
+    host = "fungi.ensembl.org"
+  )
+ensembl <- useDataset(
+    dataset = "spombe_eg_gene",
+    mart = ensembl
+  )
+```
+
+## [1.2.] Get all genes encoded in the genome of S. pombe
+#### Step 2: Read in dataset.
+#### The established connection is used to gather data on gene attributes for all S. pombe genes.
+```{r message=FALSE}
+attributes <- c(
+    "ensembl_gene_id",
+    "external_gene_name",
+    "chromosome_name",
+    "start_position",
+    "end_position"
+  )
+
+spomb <- getBM(
+    mart = ensembl,
+    attributes = attributes,
+    useCache = FALSE
+  )
+```
+
+#### Check acquired dataset
+```{r}
+distinct(
+    .data = spomb,
+    chromosome_name
+  )
+```
+
+## [1.3.] Filter non-major chromosomes
+#### Step 3: Clean data.
+```{r}
+spomb <- filter(
+    .data = spomb,
+    # chromosome_name %in% c("I","II","III", "MT")
+    chromosome_name %in% c("I","II","III")
+  )
+```
+
+## [1.4.] Calculate gene length
+#### Step 4: Analyse data (i.e., address hypothesis).
+```{r}
+spomb_plot <- mutate(
+    .data = spomb,
+    gene_length = end_position - start_position -1L
+  )
+```
+
+## [1.5.] Plot gene length as function of S.pombe chromosome
+#### Step 5: Visualize data.
+```{r}
+ggplot2::ggplot(
+      data = spomb_plot,
+      mapping = aes(
+        x = chromosome_name,
+        y = gene_length
+      )
+    ) +
+  geom_boxplot(
+      alpha = 0.05,
+      outlier.shape = NA,
+      outlier.size = NA
+    ) +
+  geom_jitter(
+      height = 0,
+      width = 0.3,
+      alpha = 0.05
+    ) +
+  theme_bw() +
+  theme(
+      aspect.ratio = 2
+    )
+```
+
+```{r}
+ggplot2::ggplot(
+      data = spomb_plot,
+      mapping = aes(
+        x = gene_length,
+        color = chromosome_name
+      )
+    ) +
+  geom_vline(
+      xintercept = 1500L,
+      linetype = "dashed"
+    ) +
+  geom_density(
+      alpha = 0.05,
+      outlier.shape = NA,
+      outlier.size = NA
+    ) +
+  theme_bw() +
+  theme(
+      aspect.ratio = 2
+    )
+```
+
+<style>
+div.blue { background-color:#e6f0ff; border-radius: 5px; padding: 20px;}
+</style>
+
+## [1.6.] Summary - Typical steps of a <b>data analysis workflow</b>
+
+<div class = "blue">
+  <font size="+2">
+    [1.] \ Build your <b>environment</b>.  
+    [2.] \ <b>Read in</b> or <b>import</b> dataset(s).  
+    [3.] \ <b>Clean</b> data.  
+    [4.] \ <b>Analyse</b> data, i.e., calculate new variables, model, learning approaches.  
+    [5.] \ <b>Visualize</b> the results, i.e., draw graphs, generate tables.  
+  </font>
+</div>
+
+***
+
+# [2.] Overview of basic grammar/vocabulary of data handling
+
+<div class = "blue">
+  <font size="+2">
+    - \ <b>Change column names</b> to specify parameters, i.e., <b>rename</b>.    
+    - \ <b>Combine columns</b> into parameter groups, i.e., <b>group_by</b>.    
+    - \ <b>Choose rows</b> according to specific measurements, i.e., <b>filter</b>.   
+    - \ <b>Choose columns</b> to subset parameters of interest, i.e., <b>select</b>.    
+    - \ <b>Order rows</b> by measurements of particular parameters, i.e., <b>arrange</b>.   
+    - \ <b>Transform data</b> into tidy format, i.e., <b>gather</b>, <b>spread</b> or <b>pivot</b>.   
+    - \ <b>Create new columns</b> by modifying other columns / parameters, i.e., <b>mutate</b>.   
+    - \ <b>Compile rows</b> by parameters of interest, i.e., <b>summarise</b>.    
+      
+  </font>
+</div>
+
+***
+
+# [3.] Read in dataset
+
+## [3.0.] Read in data with readr package
+#### Coding practice: Use 'relative' path names with the help of the 'here' package.
+#### Coding practice: Use functions together with their package names: *package*::*function*()
+#### For 'help' page & lists of arguments type ?<command> (i.e., ?read_delim) in console.
+```{r}
+sample_overview_ <- readr::read_delim(
+    file = here::here("data/samples.tsv"),
+    delim = "\t",
+    quote = "\"",
+    col_names = TRUE,
+    col_types = "ciccc"
+  )
+```
+
+#### Check acquired dataset
+```{r}
+utils::head(
+    x = sample_overview_,
+    n = 3
+  )
+```
+
+***
+
+# [4.] Apply basic grammar/vocabulary of data handling
+
+## [4.0.] <b>Change column names</b>
+#### Coding practices: Use each variable or object name only once:
+#### e.g., 'sample_overview' vs. 'sample_overview_'
+```{r}
+sample_overview <- dplyr::rename(
+    .data = sample_overview_,
+    genotype = "mut",
+    id = "ID",
+    temperature = "temp",
+    replicate = "rep",
+    sample = "filename"
+  )
+```
+
+#### Extra: Alternative way of using rename with variable evaluation.
+#### See 'rlang' package for more information of 'tidyeval'.
+```{r}
+var <- c(
+  genotype = "mut",
+  temperature = "temp",
+  replicate = "rep",
+  sample = "filename"
+)
+
+dplyr::rename(
+    .data = sample_overview_,
+    !!!var
+  )
+```
+
+***
+
+## [4.1.] <b>Combine columns & compile rows</b>
+#### Count the amount of samples per temperature.
+```{r}
+z <- dplyr::group_by(
+    .data = sample_overview,
+    temperature
+  )
+
+dplyr::summarise(
+    .data = z,
+    N = dplyr::n()
+  )
+```
+
+#### Count the amount of replicates per 'genotype'.
+```{r}
+y <- dplyr::group_by(
+    .data = sample_overview,
+    genotype
+  )
+
+dplyr::summarise(
+    .data = y,
+    N = n()
+  )
+```
+
+#### Count the amount of replicates per 'genotype & temperature'.
+```{r}
+x <- dplyr::group_by(
+    .data = sample_overview,
+    genotype, temperature
+  )
+
+dplyr::summarise(
+    .data = x,
+    N = n()
+  )
+```
+
+***
+
+## [4.2.] <b>Choose rows & columns</b>
+#### Identify samples associated with 'spd1_pro' at 25C.
+#### Note: The logical operator "==" is not the same as the assignment operator "=".
+```{r}
+w <- dplyr::filter(
+    .data = sample_overview,
+    genotype == "spd1_pro" & temperature == "25C"
+  )
+
+dplyr::select(
+    .data = w,
+    genotype, temperature, sample
+  )
+
+dplyr::select(
+    .data = w,
+    sample
+  )
+```
+
+#### Identify samples associated with 'wt' at 25C or 'spd1_pro' at 33C.
+#### Filter allows for including logics, i.e, 'not' / 'and' / 'or'.
+```{r}
+v <- dplyr::filter(
+    .data = sample_overview,
+    (genotype == "wt" & temperature == "25C") |
+    (genotype == "spd1_pro" & temperature == "33C")
+  )
+
+dplyr::select(
+    .data = v,
+    sample
+  )
+```
+
+***
+
+## [4.3.] <b>Order rows</b>
+#### Sort IDs from highest to lowest.
+```{r}
+dplyr::arrange(
+    .data = sample_overview,
+    id
+  )
+```
+
+***
+
+## [4.4.] <b>Create new columns</b>
+```{r}
+dplyr::mutate(
+  .data = sample_overview,
+  Genotype = base::toupper(
+      genotype
+    ),
+  Condition = stringr::str_c(
+      genotype,temperature,
+      sep = "_"
+    )
+  )
+```
+
+***
+
+## [4.5.] <b>Transform data</b>
+#### Coding practice: Keep one observation per row accompanied by all defining arguments.
+#### Gather samples belonging to the same experimental conditions.
+```{r}
+sample_overview_wide <- tidyr::pivot_wider(
+    data = sample_overview_,
+    names_from = "rep",
+    values_from = "filename"
+  )
+```
+
+#### Check dataset
+```{r}
+sample_overview_wide
+```
+
+#### Reverse to long format.
+```{r}
+tidyr::pivot_longer(
+    data = sample_overview_wide,
+    cols = base::c("a","b","c"),
+    names_to = "rep",
+    values_to = "filename"
+  )
+```
+
+***
+
+# [5.] Making explicit <b>decisions</b> via <b>"if - else"</b> statements
+## [5.0.] "if - else" statements are integral tools in analytic workflows
+
+<div class = "blue">
+  <font size="+2">
+      <b>if (</b>\<assertion_1\><b>) {</b>  
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; \<statement_1\>  
+      &nbsp;&nbsp;&nbsp; <b>} else if (</b>\<assertion_2\><b>) {</b>  
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; \<statement_2\>  
+      &nbsp;&nbsp;&nbsp; <b>} else if (</b>\<assertion_3\><b>) {</b>  
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; \<statement_3\>  
+      &nbsp;&nbsp;&nbsp; <b>} else {</b>  
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; \<statement_4\>  
+      &nbsp;&nbsp;&nbsp; <b>}</b>  
+    </b>
+  </font>
+</div>
+
+## [5.1.] Many alternatives for "if - else" statements exist.
+
+<div class = "blue">
+  <font size="+2">
+    <b>
+      - \ base::ifelse()  
+      - \ dplyr::if_else()  
+      - \ dplyr::case_when()  
+    </b>
+  </font>
+</div>
+
+## [5.2.] Combine 'if'-statement with mutate
+```{r}
+dplyr::mutate(
+    .data = sample_overview,
+    repl_first = dplyr::if_else(
+        replicate == "a",
+        true = TRUE,
+        false = FALSE
+      ),
+    repl_second = dplyr::case_when(
+      replicate == "b" ~ TRUE,
+      TRUE ~ FALSE
+    )
+  )
+```
+
+
+***
+
+# [6.] <b>"Functions"</b> & how to <b>"map"</b> them  
+#### Functions represent one of the core pillars of programming & data analysis.
+
+<div class = "blue">
+  <font size="+2">
+    - \ <b>Definition:</b> Locally confined environment to perform specific set of tasks.  
+    &nbsp;&nbsp;&nbsp;&nbsp;i.e., Variables defined in the function are not available outside of this function.  
+    - \ The name of a function is defined by its initial assignment,  
+    &nbsp;&nbsp;&nbsp;&nbsp;i.e., <b>function_name</b> <- function(...).  
+    - \ The input to a function is solely defined through the arguments,  
+    &nbsp;&nbsp;&nbsp;&nbsp;i.e., function_name <- function(<b>arguments</b>).  
+    - \ The functions output is defined via the function 'return', i.e., return(<b>output</b>).  
+  </font>
+</div>
+
+## [6.1.] Helper function to convert Celsius into Fahrenheit
+```{r}
+far <- function(temp){
+    out <- (base::as.double(temp)*9/5) + 32
+    return(out)
+  }
+```
+
+## [6.2.] Helper function to convert temperatures
+```{r}
+converter <- function(temp, unit="K"){
+    if(!(unit %in% c("K","F"))){
+      stop("Chosen unit not recognised.")
+    } else {
+      if(unit == "K"){
+          out <- as.double(temp) + 273.15
+        }
+      if(unit == "F"){
+          out <- (as.double(temp)*9/5) + 32
+        }
+      return(out)
+    }
+  }
+```
+
+## [6.3.] Helper function to extract temperature
+#### The 'pattern' argument of the 'str_replace' command requires a <b>regular expression</b>.
+#### Regular expressions define string patterns & allow to identify them.
+#### See '?base::regex' for a comprehensive overview.
+```{r}
+extractor <- function(x){
+    tmp_chr <- stringr::str_replace(
+        string = x,
+        pattern = '(.*?)C',
+        replacement = '\\1'
+      )
+    tmp_int <- base::as.integer(
+        x = tmp_chr
+      )
+    return(tmp_int)
+  }
+```
+
+## [6.4.] Check helper functions
+#### Coding practices: Use 'L' following an integer number to define this number clearly.
+```{r}
+cel = 0
+far(cel)
+
+cel_chr = "63C"
+cel_int <- extractor(
+    x = cel_chr
+  )
+
+converter(
+    temp = cel_int,
+    unit = "F"
+  )
+```
+
+## [6.5.] <b>"map"</b> helper functions to all rows
+#### Extract the integer number from the temperature string.
+#### The versatile family of "map" functions is defined by the 'purrr' package.
+```{r}
+u <- dplyr::mutate(
+  .data = sample_overview,
+  temperature = purrr::map_int(
+      .x = temperature,
+      .f = extractor
+    ),
+  temperature = purrr::map_dbl(
+      .x = temperature,
+      .f = converter
+    )
+  )
+
+utils::head(
+    x = u,
+    n = 3
+  )
+```
+
+***
+
+# [7.] <b>"R at the crossroads"</b> - 'base R' vs. 'tidyverse'
+
+## [7.0.] base R
+#### 'base R' follows mathematical notation, e.g. 'x function of y': x = f(y)
+<div class = "blue">
+  <font size="+1">
+      <b>eat(</b>  
+      &nbsp;&nbsp;&nbsp;  <b>slice(</b>   
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;    <b>bake(</b>    
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;      <b>place(</b>    
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;          <b>pour(</b>    
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;              <b>mix(</b>    
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;                  ingredients  
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;                <b>),</b>  
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;              into = baking_form  
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;            <b>),</b>  
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;          into = oven  
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;        <b>),</b>  
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;      time = 30  
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;    <b>),</b>  
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;    pieces = 6  
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;  <b>),</b>  
+      &nbsp;&nbsp;&nbsp;  1  
+      &nbsp;&nbsp;&nbsp;  <b>)</b>  
+    </b>
+  </font>
+</div>
+
+## [7.1.] tidyverse
+#### 'tidyverse' follows workflow notation, e.g., 'y gives rise to x': y > x
+<div class = "blue">
+  <font size="+1">
+      ingredients <b>%>%</b>  
+      &nbsp;&nbsp;&nbsp;  <b>mix() %>%</b>  
+      &nbsp;&nbsp;&nbsp;  <b>pour(</b>into = baking_form<b>) %>%</b>  
+      &nbsp;&nbsp;&nbsp;  <b>place(</b>into = oven<b>) %>%</b>  
+      &nbsp;&nbsp;&nbsp;  <b>bake(</b>time = 30<b>) %>%</b>  
+      &nbsp;&nbsp;&nbsp;  <b>slice(</b>pieces = 6<b>) %>%</b>  
+      &nbsp;&nbsp;&nbsp;  <b>eat(</b>1<b>)</b>  
+    </b>
+  </font>
+</div>
+
+## [7.2.] Principles of a tidyverse workflow
+<div class = "blue">
+  <font size="+1">
+[1.] \ <b>Reuse</b> existing data structures, i.e., functions.  
+[2.] \ Prefer <b>functional programming</b>.  
+[3.] \ Program for <b>humans</b>.  
+[4.] \ <b>Combine</b> data structures into <b>pipes</b>.  
+  </font>
+</div>
+###### Adapted from Wickham, H., "The tidy tools manifesto."
+
+***
+
+# [8.] Combining the data grammar / vocabulary into <b>pipes</b>
+
+## [8.0.] Piping structures
+#### Pipes (' %>% ') allow to hand over data from one function to the next.
+#### They remove the necessity to define intermediate objects.
+```{r eval=FALSE}
+sample_overview_ %>%
+  dplyr::mutate(
+      temperature = purrr::map_int(
+        .x = temp,
+        .f = extractor
+      )
+    ) %>%
+  dplyr::select(
+      mut, ID, rep, temperature
+    ) %>%
+  dplyr::rename(
+      genotype = "mut",
+      id = "ID",
+      replicate = "rep"
+    ) %>%
+  dplyr::filter(
+      genotype == "wt" & temperature == 25
+    )
+```
+
+## [8.1.] Extract all non-redundant information
+```{r eval=FALSE}
+sample_overview_ %>%
+  dplyr::mutate(
+      temperature = purrr::map_int(
+          .x = temp,
+          .f = function(x){
+            return(
+              stringr::str_replace(
+                  string = x,
+                  pattern = '(.*?)C',
+                  replacement = '\\1'
+                ) %>%
+                base::as.integer()
+            )
+          }
+        ),
+      seqID = purrr::map_chr(
+        .x = filename,
+        .f = function(x){
+          return(
+            stringr::str_replace(
+              string = x,
+              pattern = '^.*TB(.*?)$',
+              replacement = '\\1'
+            )
+          )
+        }
+      )
+    ) %>%
+  dplyr::select(
+      mut,ID,rep,temperature,seqID
+    ) %>%
+  dplyr::rename(
+      genotype = "mut",
+      id = "ID",
+      replicate = "rep"
+    )
+```
+
+## [8.2.] Prepare the sample overview for differential expression analysis
+#### Coding practices: Keep your coded lines short (<80 digits per line).
+```{r}
+sample_overview. <- sample_overview_ %>%
+  dplyr::rename(.,
+      genotype = "mut",
+      temperature = "temp"
+    ) %>%
+  dplyr::mutate(
+    path = base::paste0(
+        here::here("data/"),
+        filename,
+        "_quant"
+      ),
+    condition = base::paste(
+        genotype,temperature,
+        sep = "_"
+      ),
+    sample = base::paste(
+        genotype,temperature,rep,
+        sep = "_"
+      )
+    ) %>%
+  dplyr::select(
+      condition, sample, path,
+      genotype, temperature, rep
+    )
+
+sample_overview. %>%
+  utils::head(
+      x = .,
+      n = 3
+    )
+```
+
+***
+
+# [9.] Appendix - Detailed initial example
+
+## [9.0.] Set mart
+#### "biomaRt::listMarts()"
+#### Information: 'https://www.ensembl.org/info/data/biomart/biomart_r_package.html'
+```{r}
+pattern = "pombe"
+ensembl <- biomaRt::useMart(
+    biomart = "fungi_mart",
+    host = "fungi.ensembl.org",
+    verbose = TRUE
+  )
+dataset_ <- biomaRt::listDatasets(
+    mart = ensembl,
+    verbose = TRUE
+  ) %>%
+  dplyr::filter(
+    grepl(pattern,dataset)
+  ) %>%
+  dplyr::pull(dataset)
+ensembl <- biomaRt::useDataset(
+    dataset = dataset_,
+    mart = ensembl,
+    verbose = TRUE
+  )
+```
+
+## [9.1.] Identify mart attributes & filters
+```{r R.options=list(max.print=3)}
+biomaRt::listAttributes(
+    mart = ensembl
+  )
+biomaRt::listFilters(
+    mart = ensembl
+  )
+```
+
+## [9.2.] Get all genes in S.pombe genome
+#### Check with 'dplyr::distinct(spomb,chromosome_name)'
+```{r message=FALSE,warning=FALSE}
+attributes_ <- base::c(
+    "ensembl_gene_id","external_gene_name",
+    "chromosome_name","start_position",
+    "end_position"
+  )
+values_ <- base::c("MT")
+
+spomb <- biomaRt::getBM(
+    mart = ensembl,
+    attributes = attributes_,
+    # values = values_,
+    # filters = c("chromosome_name"),
+    checkFilters = TRUE,
+    verbose = FALSE,
+    useCache = FALSE
+  )
+```
+
+## [9.3.] Calculate gene length
+```{r}
+spomb_plot <- spomb %>%
+  dplyr::mutate(
+    gene_length = purrr::pmap_int(
+      .l = list(
+          start_position,
+          end_position
+        ),
+      .f = function(s,e){
+          return(e-s-1L)
+        }
+      )
+    )
+```
+
+## [9.4.] Plot gene length as function of S.pombe chromosome
+```{r}
+ggplot2::ggplot(
+      data = spomb_plot,
+      mapping = aes(
+        x = chromosome_name,
+        y = gene_length
+      )
+    ) +
+  geom_boxplot(
+      outlier.size = NA,
+      outlier.shape = NA
+    ) +
+  geom_jitter(
+      height = 0,
+      width = 0.3,
+      alpha = 0.05
+    ) +
+  theme(
+      aspect.ratio = 1
+    )
+```
+
+```{r}
+ggplot2::ggplot(
+      data = spomb_plot,
+      mapping = aes(
+        x = chromosome_name,
+        y = gene_length
+      )
+    ) +
+  geom_violin(
+      adjust = 20
+    ) +
+  theme(
+      aspect.ratio = 1
+    )
+```

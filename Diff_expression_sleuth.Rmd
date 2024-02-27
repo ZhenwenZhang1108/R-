@@ -1,0 +1,627 @@
+---
+title: "Differential expression analysis"
+author: "robert.krautz@bio.ku.dk, @_rob_kr_"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## [-1.0.] Install necessary packages
+#### This code chunk is only necessary for reproducing the code on your local machine.
+```{r eval=FALSE}
+BiocManager::install("rhdf5", force = TRUE)
+utils::install.packages("devtools")
+devtools::install_github("pachterlab/sleuth")
+```
+
+***
+
+# [0.] Prerequisites
+
+## [0.0.] Load necessary packages
+#### Coding practice: Use functions together with their package names: *package*::*function*()
+```{r message=FALSE}
+base::library(tidyverse)
+# base::library(here)
+# base::library(ggrepel)
+# base::library(sleuth)
+```
+
+## [0.1.] Color palette
+```{r}
+pal <- base::c(
+    "#3255A4", "#A4DBE8", "#8C8279",
+    "#EA7600", "#F6BE00", "#28B463",
+    "#AF7AC5", "#0E6655", "#0097A9",
+    "#E03C31", "#B5BD00", "#500778",
+    "#93272C", "#C6B0BC", "#8F993E",
+    "#17202A", "#FF6F00", "#555025"
+  )
+```
+
+***
+
+# [1.] Read in data
+
+## [1.0.] Read in target_map
+#### Reminder: Using functions 'explicitly' means to specify them together with their package.
+#### e.g., readr::read_delim(), here::here(), base::c()
+#### 'target_map' object represents a lexicon for S. pombe gene identifiers.
+```{r}
+target_map <- readr::read_delim(
+    file = here::here("data/tx2gene.tsv"),
+    delim = "\t",
+    quote = "\"",
+    col_names = base::c("target_id","ext_gene"),
+    skip = 1L,
+    col_types = "cc"
+  )
+```
+
+## [1.1.] Read data on all samples
+#### Check data with 'View(sample_overview_)'
+```{r}
+sample_overview_ <- readr::read_delim(
+    file = here::here("data/samples.tsv"),
+    delim = "\t",
+    quote = "\"",
+    col_names = TRUE,
+    col_types = "ccccc"
+  )
+```
+
+## [1.2.] Modify sample_overview
+```{r}
+sample_overview. <- sample_overview_ %>%
+  dplyr::rename(.,
+      genotype = "mut",
+      temperature = "temp"
+    ) %>%
+  dplyr::mutate(
+    path = base::paste0(
+        here::here("data/"),
+        filename,
+        "_quant"
+      ),
+    condition = base::paste(
+        genotype,temperature,
+        sep = "_"
+      ),
+    sample = base::paste(
+        genotype,temperature,rep,
+        sep = "_"
+      )
+    ) %>%
+  dplyr::select(
+      condition, sample, path,
+      genotype, temperature, rep
+    )
+```
+
+## [1.3.] Add indivdual colors to conditions
+```{r}
+condition_nr <- sample_overview. %>%
+  dplyr::distinct(condition) %>%
+  base::nrow()
+
+sample_overview <- sample_overview. %>%
+  dplyr::group_by(condition) %>%
+  tidyr::nest() %>% 
+  dplyr::bind_cols(
+      col = pal[1:condition_nr]
+    ) %>%
+  tidyr::unnest(
+      cols = c(data)
+    ) %>%
+  dplyr::ungroup()
+```
+
+***
+
+# [2.] Prepare sleuth input
+
+## [2.0.] Prepare full_design
+#### Assumption: When comparing 2 out of the 8 conditions, the 2 chosen
+#### conditions are modelled/treated as individual independent variables.
+#### 'full_design' object outlines how groups should be treated during the differential expression analysis.
+```{r}
+ctrl = "wt_25C"
+exp = "wt_33C"
+
+full_design <- sample_overview %>%
+  dplyr::filter(
+      condition %in% base::c(ctrl,exp)
+    ) %>% 
+  dplyr::mutate(
+    con = purrr::map_int(
+      .x = condition,
+      .f = function(c){
+          base::ifelse(
+              test = c == exp,
+              yes = 1L,
+              no = 0L
+            )
+          }
+        ),
+      `(Intercept)` = 1L
+    ) %>%
+  dplyr::select(
+      sample, con, `(Intercept)`
+    ) %>%
+  dplyr::rename(
+      !!rlang::sym(exp):=con
+    ) %>%
+  tibble::column_to_rownames(
+      var = "sample"
+    ) %>%
+  base::as.matrix()
+```
+
+## [2.1.] Prepare design_overview
+```{r}
+design_overview <- sample_overview %>%
+  dplyr::filter(
+      condition %in% base::c(exp,ctrl)
+    )
+```
+
+***
+
+# [3.] Generate integrated sleuth object
+
+## [3.0.] Generate sleuth object
+#### 'gene_mode' crucial argument for sleuth_prep (see help)
+```{r message=FALSE,warning=FALSE}
+sout <- sleuth::sleuth_prep(
+    sample_to_covariates = design_overview,
+    full_model = full_design,
+    target_mapping = target_map,
+    aggregation_column = 'ext_gene',
+    extra_bootstrap_summary = TRUE,
+    gene_mode = TRUE
+  )
+```
+
+## [3.1.] Check correct "transcript mapping" & "full design"
+#### This ensures that the generated sleuth object carries the correct information.
+```{r}
+utils::head(sout$target_mapping)
+sout$design_matrix
+```
+
+## [3.2.] Standard sleuth evaluation tools
+#### Check also 'suc22', 'fbp1','SPNCRNA.244' instead of 'mcm7'.
+```{r}
+gene = 'mcm7'
+
+sleuth::plot_bootstrap(
+    obj = sout,
+    target_id = gene,
+    units = "scaled_reads_per_base",
+    color_by = 'condition'
+  )
+```
+
+```{r}
+sleuth::plot_pca(
+    obj = sout,
+    pc_x = 1L,
+    pc_y = 2L,
+    units = "scaled_reads_per_base",
+    color_by = 'condition'
+  )
+```
+
+***
+
+# [4.] Statistical modelling
+
+## [4.0.] Fit measurement error model
+#### Try also alternative models: 'formula = ~genotype'; 'formula = ~temperature'
+```{r}
+sout <- sleuth::sleuth_fit(
+    obj = sout,
+    fit_name = "full"
+  )
+sout <- sleuth::sleuth_fit(
+    obj = sout,
+    formula = ~1,
+    fit_name = "reduced"
+  )
+sleuth::models(sout)
+```
+
+## [4.1.] Perform likelihood ratio test (i.e., lrt)
+#### To apply the above alternative models: "reduced":"genotype"; "reduced":"temperature"
+```{r}
+sout <- sleuth::sleuth_lrt(
+    obj = sout,
+    null_model = "reduced",
+    alt_model = "full"
+  )
+sleuth::tests(sout)
+```
+
+## [4.2.] Perform wald test for individual comparisons
+#### See [2.0.] for definition of 'exp'.
+```{r}
+sout <- sleuth::sleuth_wt(
+    obj = sout,
+    which_beta = exp,
+    which_model = 'full'
+  )
+sleuth::tests(sout)
+```
+
+## [4.3.] Extract data for significantly, differentially expressed (sigDE) genes - v1.0
+#### Differential expression here defined according to linear regression transformation.
+#### First extract the data & subset genes then by q-value.
+```{r}
+res_lrt <- sleuth::sleuth_results(
+    obj = sout,
+    which_model = "full",
+    test_type = "lrt",
+    test = "reduced:full",
+    rename_cols = FALSE,
+    show_all = TRUE
+  )
+
+thresh = 0.01
+res_lrt_sig <- res_lrt %>%
+  dplyr::filter(qval <= thresh) %>%
+  dplyr::arrange(qval)
+```
+
+## [4.4.]  Extract data for significantly, differentially expressed (sigDE) genes - v2.0
+#### Differential expression here defined according to wald test.
+#### OBS! The help page for sleuth_results is not accurately stating this, but:
+#### Check sleuth::models(sout) for 'which_model' & sleuth::tests(sout) for 'test'
+```{r}
+res_wt <- sleuth::sleuth_results(
+    obj = sout,
+    which_model = "full",
+    test_type = "wt",
+    test = "wt_33C",
+    rename_cols = FALSE,
+    show_all = TRUE,
+    pval_aggregate = FALSE
+  )
+
+thresh = 1/(10^10)
+res_wt_sig <- res_wt %>%
+  dplyr::filter(qval <= thresh) %>%
+  dplyr::arrange(qval)
+```
+
+## [4.5.] Check the acquired sigDE gene lists
+```{r}
+res_wt_sig %>%
+  dplyr::filter(
+      target_id %in% base::c("tos4","dak2")
+    )
+
+res_wt_sig %>%
+  dplyr::arrange(dplyr::desc(b)) %>%
+  utils::head()
+res_lrt_sig %>%
+  dplyr::arrange(dplyr::desc(rss)) %>%
+  utils::head()
+```
+
+***
+
+# [5.] Prepare data for plotting
+
+## [5.0.] Prepare data for plotting
+```{r}
+res_w <- res_wt %>%
+  tidyr::drop_na() %>%
+  dplyr::mutate(
+    sigDE = purrr::pmap_lgl(
+      .l = list(
+          qval,
+          b
+        ),
+      .f = function(q,b){
+        base::ifelse(
+            test = ((q <= 0.001 & b >= 1) | (q <= 0.001 & b <= -1)),
+            yes = TRUE,
+            no = FALSE
+          )
+        }
+      ),
+    lab = purrr::pmap_lgl(
+      .l = list(
+          qval,
+          b
+        ),
+      .f = function(q,bval){
+        base::ifelse(
+            test = ((q <= 0.001 & bval > 4) | (q <= 0.001 & bval < 4*(-1))),
+            yes = TRUE,
+            no = FALSE
+          )
+        }
+      )
+    ) %>%
+  dplyr::arrange(desc(b))
+```
+
+## [5.1.] Identify x- & y-maxima for graph
+```{r}
+x_lim <- res_w %>%
+  dplyr::select(b) %>%
+  tidyr::drop_na() %>%
+  base::range() %>%
+  base::abs() %>%
+  base::max() %>%
+  base::round(.,digits=2)
+
+y_lim <- res_w %>%
+  dplyr::select(qval) %>%
+  tidyr::drop_na() %>%
+  dplyr::mutate(
+      norm = (-1)*base::log10(qval)
+    ) %>%
+  dplyr::filter(
+      norm != Inf
+    ) %>%
+  dplyr::select(norm) %>% 
+  base::range() %>%
+  base::max() %>%
+  base::ceiling()
+```
+
+## [5.2.] Generate subset of genes to be labelled
+```{r}
+subs <- dplyr::filter(
+    .data = res_w,
+    lab == TRUE
+  )
+```
+
+***
+
+# [6.] Visualisation
+
+## [6.0.] Volcano plot for exp-vs-ctrl
+#### See [2.0.] for definition of ctrl & exp (i.e., wt_33C-vs-wt_25C)
+```{r}
+ggplot2::ggplot(
+      data = res_w,
+      mapping = aes(
+        x = b,
+        y = -log10(qval),
+        colour = sigDE,
+        label = target_id
+      )
+    ) +
+  geom_point(
+      alpha = 0.5
+    ) +
+  ggrepel::geom_label_repel(
+      data = subs,
+      size = 2,
+      max.overlaps = 100
+    ) +
+  geom_hline(
+      yintercept = (-1)*base::log10(0.001),
+      linetype = "dashed"
+    ) +
+  geom_vline(
+      xintercept = base::c(-1,1),
+      linetype = "dashed"
+    ) +
+  scale_colour_manual(
+      limits = base::c(TRUE,FALSE),
+      breaks = base::c(TRUE,FALSE),
+      values = base::c("#E69F00","black")
+    ) +
+  xlim(-x_lim,x_lim) +
+  ylim(-10,y_lim) +
+  theme_bw() +
+  theme(
+      aspect.ratio = 1,
+      legend.position = "none"
+    )
+```
+
+## [6.1.] MA plot for exp-vs-ctrl
+#### See [2.0.] for definition of ctrl & exp (i.e., wt_33C-vs-wt_25C)
+```{r}
+ggplot2::ggplot(
+      data = res_w,
+      mapping = aes(
+        x = mean_obs,
+        y = b,
+        colour = sigDE,
+        label = target_id
+      )
+    ) +
+  geom_point(
+      alpha = 0.5
+    ) +
+  ggrepel::geom_label_repel(
+      data = subs,
+      size = 2,
+      max.overlaps = 100
+    ) +
+  geom_hline(
+      yintercept = 0,
+      linetype = "dashed"
+    ) +
+  scale_colour_manual(
+      limits = base::c(TRUE,FALSE),
+      breaks = base::c(TRUE,FALSE),
+      values = base::c("#E69F00","black")
+    ) +
+  theme_bw() +
+  theme(
+      aspect.ratio = 1,
+      legend.position = "none"
+    )
+```
+
+***
+
+# [7.] Appendix - Manual bootstrap analysis
+
+#### The next two sections will explain [3.2.] in more detail, to:
+#### 1. Explain the underlying data & code better.
+#### 2. Be able to transfer the knowledge of performing PCA analyses.
+
+## [7.0.] Read_out bootstraps for specific gene
+#### Check also 'suc22', 'fbp1','SPNCRNA.244' instead of 'mcm7'.
+```{r}
+gene = 'mcm7'
+
+bts_data <- sleuth::get_bootstrap_summary(
+    obj = sout,
+    target_id = gene,
+    units = "scaled_reads_per_base"
+  )
+```
+
+## [7.1.] Prepare data for plotting
+```{r}
+genotypes <- sample_overview %>%
+  dplyr::distinct(genotype) %>%
+  dplyr::pull(genotype)
+
+bts_plot <- bts_data %>%
+    dplyr::mutate(
+      genotype = base::factor(
+        x = genotype,
+        levels = genotypes,
+        ordered = TRUE
+      )
+    ) %>%
+  dplyr::arrange(genotype)
+```
+
+## [7.2.] Plot bootstraps
+```{r}
+ggplot2::ggplot() +
+  geom_boxplot(
+      data = bts_plot,
+      mapping = aes(
+          x = rep,
+          ymin = min,
+          ymax = max,
+          lower = lower,
+          middle = mid,
+          upper = upper,
+          fill = condition
+        ),
+      outlier.shape = NA,
+      outlier.size = NA,
+      stat = "identity"
+    ) +
+  facet_wrap(
+      facets = ~genotype + temperature,
+      nrow = 1
+    ) +
+  scale_fill_manual(
+      limits = bts_plot$condition,
+      breaks = bts_plot$condition,
+      values = bts_plot$col
+    ) +
+  theme_bw() +
+  theme(
+      aspect.ratio = 2
+    )
+```
+
+***
+
+# [8.] Appendix - Manual PCA analysis
+
+## [8.0.] Prepare matrix for PCA
+#### Extract the summarized data with 'sout$obs_norm_filt'
+```{r}
+order <- design_overview %>%
+  dplyr::distinct(sample) %>%
+  dplyr::pull(sample)
+
+mat <- sout$obs_norm_filt %>%
+  dplyr::mutate(
+      sample = base::factor(
+        x = sample,
+        levels = order,
+        ordered = TRUE
+      )
+    ) %>%
+  dplyr::arrange(sample) %>% 
+  dplyr::select(-tpm) %>%
+  tidyr::pivot_wider(
+      names_from = 'sample',
+      values_from = 'scaled_reads_per_base'
+    ) %>%
+  tibble::column_to_rownames(
+      var = "target_id"
+    ) %>% 
+  base::as.matrix()
+```
+
+## [8.1.] Run PCA & prepare plotting
+```{r}
+pcs <- base::c(1,2)
+pca_cols <- purrr::map_chr(
+  .x = pcs,
+  .f = function(x){
+      base::paste0("PC",x)
+    }
+  )
+
+pca_plot <- stats::prcomp(x = base::t(mat))$x %>%
+  tibble::as_tibble(
+      rownames = "sample"
+    ) %>%
+  dplyr::select(sample, tidyselect::all_of(pca_cols)) %>%
+  dplyr::left_join(
+      x = .,
+      y = design_overview,
+      by = "sample"
+    )
+```
+
+## [8.2.] Plot PCs
+#### temperature separates in PC1
+#### genotype separates mostly in PC3
+```{r}
+ggplot2::ggplot(
+      data = pca_plot,
+      mapping = aes(
+        x = !!rlang::sym(pca_cols[1]),
+        y = !!rlang::sym(pca_cols[2]),
+        colour = condition
+      )
+    ) +
+  geom_point(
+      alpha = 0.6,
+      size = 3
+    ) +
+  scale_color_manual(
+      breaks = pca_plot$condition,
+      limits = pca_plot$condition,
+      values = pca_plot$col
+    ) +
+  theme_bw() +
+  theme(
+    legend.justification = base::c(0,1),
+    legend.position = base::c(0.025,0.975),
+    legend.background = element_rect(
+        fill = "grey75"
+      ),
+    legend.title = element_blank(),
+    aspect.ratio = 1
+  )
+```
+
+## [8.3.] Get summary from PCA
+```{r}
+pca <- stats::prcomp(base::t(mat))
+base::summary(pca)
+```
